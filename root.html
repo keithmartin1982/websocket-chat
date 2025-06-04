@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat </title>
+    <style>
+        body {
+            overflow: hidden;
+        }
+        html, input, button {
+            background-color: black;
+            color: red;
+        }
+        input, button, .border {
+            border: red solid 1px;
+        }
+        input {
+            padding: 5px;
+            margin: 15px;
+        }
+        .intro {
+            z-index: 2;
+            background-color: black;
+            color: white;
+            text-align: center;
+            width: fit-content;
+            height: 75%;
+            position: relative;
+            top: 25px;
+            padding: 25px;
+            border: 1px grey solid;
+            margin: auto;
+        }
+        .chat {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            grid-column-gap: 5px;
+            grid-row-gap: 5px;
+        }
+        .output {
+            padding: 5px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            grid-area: 1 / 1 / 5 / 5;
+        }
+        .users {
+            text-align: center;
+            grid-area: 1 / 5 / 5 / 6;
+        }
+        .input { grid-area: 5 / 1 / 6 / 6; }
+        .message_input {
+            width: 75%;
+        }
+        #messageDiv {
+            position: relative;
+            left: 15px;
+            top: 30%;
+        }
+        .msg {
+            margin-top: 5px;
+        }
+        .close_button {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+        }
+        .gen_button {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+        }
+        .users_item {
+            padding: 10px;
+            width: 100%;
+            height: 15px;
+        }
+        .me {
+            color: coral;
+        }
+        #popup {
+            z-index: 9000;
+            background-color: black;
+            margin-top: 45px;
+            width: fit-content;
+            height: fit-content;
+            margin-inline: auto;
+            position: relative;
+            text-align: center;
+        }
+        .popup_message {
+            color: white;
+            padding: 42px;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+<div class="chat">
+    <div id="output" class="output border">
+
+    </div>
+    <div id="users" class="users border">
+        <div class="border users_item me">
+            <a id="connectedUsers">0</a>
+        </div>
+    </div>
+    <div class="input border">
+        <div id="messageDiv">
+            <label for="encrypted_message">Message:<input id="encrypted_message" class="message_input" type="text" ></label>
+            <button onclick="sendMessage(em.value, true);em.value = '';">Send</button>
+        </div>
+    </div>
+</div>
+<script>
+    const givenNames = ["John", "Jane", "Tom", "Joe", "Ryan", "Stacy", "Mark", "Mary", "Linda", "David", "James", "Nick", "Sara", "Barbra", "james", "jack", "Emily"];
+    const familyNames = ["Doe", "Smith", "Jones", "Miller", "Davis", "Martin", "Snyder", "O'brien", "Barry", "Kennedy", "Mitchell", "Anderson", "Hall", "White", "Taylor", "Robinson", "Thompson"];
+    console.log(`    WebSocket-Chat
+
+    Commands:
+        !info         shows the room login info
+
+    `)
+    const users_colors = [
+        "#0eefc2",
+        "#ffd553",
+        "#33FF57",
+        "#33FFF6",
+        "#a090ff",
+        "#cf63ff",
+        "#FF33A8",
+        "#ff7474",
+        "#33A8FF",
+        "#A8FF33",
+    ];
+    let secure = false;
+    let ws = null;
+    let key = "";
+    let username = "";
+    let connected = false;
+    let roomID = "";
+    let roomPassword = "";
+    let knownUsers = [];
+    let userColorMap = new Map();
+    let connectedUsers = document.getElementById("connectedUsers");
+    let output = document.getElementById('output');
+    let users = document.getElementById('users');
+    let em = document.getElementById('encrypted_message');
+    let popup = (msg) => {
+        document.body.insertAdjacentHTML("beforeend", `
+<div id="popup" class="border">
+    <a style="padding: 5px" class="close_button border" onclick="document.getElementById('popup').remove()">X</a>
+    <h1 class="popup_message">${msg}</h1>
+</div>
+        `)
+    };
+    let keyListener = () => {
+        window.addEventListener('keyup', function(event) {
+            switch (event.code) {
+                case "Enter":
+                    if (connected) {
+                        sendMessage(em.value, true);
+                        em.value = '';
+                    } else {
+                        closeIntro();
+                    }
+                    break;
+            }
+        });
+    };
+    let loadIntro = () => {
+        document.body.insertAdjacentHTML("beforeend",`<div id="intro" class="intro">
+    <button class="close_button" onclick="closeIntro();">Connect</button>
+    <button class="gen_button" onclick="generateLogin(false)">Generate</button>
+    <label for="room_id">RoomID: <input id="room_id" onchange="roomID = document.getElementById('room_id').value" value="${roomID}" type="text" minlength="4" maxlength="32"></label>
+    <br>
+    <label for="room_password">RoomPassword: <input id="room_password" onchange="roomPassword = document.getElementById('room_password').value" value="${roomPassword}" type="text"  minlength="8" maxlength="32"></label>
+    <br>
+    <label for="username_input">Username: <input id="username_input" onchange="username = document.getElementById('username_input').value" value="${username}" type="text" minlength="3" maxlength="16"></label>
+    <br>
+    <label for="encryption_key">EncryptionKey: <input id="encryption_key" onchange="key = document.getElementById('encryption_key').value" value="${key}" type="text" minlength="8" maxlength="32"></label>
+</div>`);
+    };
+    let closeIntro = () => {
+        if (username.length < 3 || key.length < 3 || roomID.length < 3|| roomPassword.length < 3) {
+            popup("ALL input fields are required!");
+            return;
+        }
+        if (!knownUsers.includes(username)) {
+            knownUsers.push(username);
+            users.insertAdjacentHTML("beforeend",`<div class="border users_item me">${username}</div>`);
+        }
+        document.getElementById('intro').remove();
+        document.title = "chatroom#"+roomID;
+        em.focus();
+        connect(secure);
+    };
+    function stringGen(length) {
+        let result           = '';
+        let characters       = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        let charactersLength = characters.length;
+        for ( let i = 0; i < length; i++ ) {
+            result += characters.charAt(Math.floor(Math.random() * charactersLength));
+        }
+        return result;
+    }
+    let generateLogin = (fixed) => {
+        if (fixed) {
+            roomID = "vY3dHj3vjt1R8jiX";
+            roomPassword = "nON0cmWwZBO01JtQ";
+            key = "vU9u5tz4USts2POV";
+        } else {
+            roomID = stringGen(16);
+            roomPassword = stringGen(16);
+            key = stringGen(16);
+        }
+        username = `${givenNames[Math.floor(Math.random() * givenNames.length)]} ${familyNames[Math.floor(Math.random() * familyNames.length)]}`;
+        document.getElementById('room_id').value = roomID;
+        document.getElementById('room_password').value = roomPassword;
+        document.getElementById('encryption_key').value = key;
+        document.getElementById('username_input').value = username;
+    };
+    let connect = (secure) => {
+        if (secure) {
+            ws = new WebSocket( "wss://"+document.location.host+"/ws");
+        } else {
+            popup("connection not secure");
+            ws = new WebSocket("ws://"+document.location.host+"/ws");
+        }
+        ws.onopen = () => {
+            sendMessage(JSON.stringify({id: roomID, p: roomPassword}, null, 2), false);
+            connected = true;
+            setTimeout(() => {
+                sendMessage("<- has entered the room!", true);
+            }, 1000);
+        };
+        ws.onmessage = (msg) => {
+            if (msg.data instanceof Blob) {
+                // Handle the Blob data
+                let reader = new FileReader();
+
+                reader.onload = () => {
+                    let cjo = JSON.parse(reader.result);
+                    // TODO : use user count
+                    connectedUsers.innerText = `ConnectedUsers: ${cjo.cc}`;
+                };
+                reader.readAsText(msg.data);
+                //console.log("blob message", msg);
+            } else {
+                //console.log("message", msg);
+                decrypt(key, msg.data).then(data => {
+                    let pjo = JSON.parse(data);
+                    if (!knownUsers.includes(pjo.un)) {
+                        userColorMap.set(pjo.un, users_colors[knownUsers.length - 1])
+                        users.insertAdjacentHTML("beforeend", `<div style="color: ${userColorMap.get(pjo.un)}" class="border users_item">${pjo.un}</div>`);
+                        knownUsers.push(pjo.un);
+                    }
+                    output.insertAdjacentHTML('beforeend', `<div style="color: ${userColorMap.get(pjo.un)}; padding: 5px; border: 1px dashed ${userColorMap.get(pjo.un)};" class="msg border">${pjo.un}: <a style="color: white">${pjo.msg}</a></div>`);
+                    output.scrollTop = output.scrollHeight;
+                });
+            }
+        };
+        ws.onerror = (evt) => {
+            if (connected) {
+                console.error(evt);
+                ws.close();
+            }
+        };
+        ws.onclose = () => {
+            if (connected) {
+                connected = false;
+                popup("Connection terminated!");
+                setTimeout(loadIntro, 2000);
+            }
+        };
+    };
+    let sendMessage = (msg, enc) => {
+        if (msg.length === 0) {
+            return;
+        }
+        if (msg.startsWith("!info")) {
+            em.value = '';
+            let info = JSON.stringify({"room_password": roomPassword, "room_id": roomID, "encryption_key": key}, null, ' ');
+            output.insertAdjacentHTML('beforeend', `<div style="color: lawngreen; padding: 5px; border: 1px dashed red;" class="msg border">!info: <a style="color: white">${info}</a></div>`);
+            output.scrollTop = output.scrollHeight;
+            return;
+        }
+        if (em.value.startsWith("!test")) {
+            test();
+        }
+        let jo = JSON.stringify({un: username, msg: msg});
+        if (enc) {
+            encrypt(key, jo).then(encryptedData => {
+                ws.send(encryptedData);
+            });
+            output.insertAdjacentHTML('beforeend', `<div style="color: lightseagreen; padding: 5px; border: 1px dashed lightskyblue;" class="msg border">${username}: <a style="color: white">${msg}</a></div>`);
+            output.scrollTop = output.scrollHeight;
+        } else {
+            ws.send(msg);
+        }
+    };
+    // encryption
+    function str2buf(str) {
+        return new TextEncoder("utf-8").encode(str);
+    }
+    function buf2str(buffer) {
+        return new TextDecoder("utf-8").decode(buffer);
+    }
+    function hex2buf(hexStr) {
+        return new Uint8Array(hexStr.match(/.{2}/g).map(h => parseInt(h, 16)));
+    }
+    function buf2hex(buffer) {
+        return Array.prototype.slice
+            .call(new Uint8Array(buffer))
+            .map(x => [x >> 4, x & 15])
+            .map(ab => ab.map(x => x.toString(16)).join(""))
+            .join("");
+    }
+    function deriveKey(passphrase, salt) {
+        salt = salt || crypto.getRandomValues(new Uint8Array(8));
+        return crypto.subtle
+            .importKey("raw", str2buf(passphrase), "PBKDF2", false, ["deriveKey"])
+            .then(key =>
+                crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt, iterations: 1000, hash: "SHA-256" },
+                    key,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["encrypt", "decrypt"],
+                ),
+            )
+            .then(key => [key, salt]);
+    }
+    function encrypt(passphrase, plaintext) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const data = str2buf(plaintext);
+        return deriveKey(passphrase).then(([key, salt]) =>
+            crypto.subtle
+                .encrypt({ name: "AES-GCM", iv }, key, data)
+                .then(ciphertext => `${buf2hex(salt)}-${buf2hex(iv)}-${buf2hex(ciphertext)}`),
+        );
+    }
+    function decrypt(passphrase, saltIvCipherHex) {
+        let [salt, iv, data] = saltIvCipherHex.split("-").map(hex2buf);
+        return deriveKey(passphrase, salt)
+            .then(([key]) => crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data))
+            .then(v => buf2str(new Uint8Array(v)));
+    }
+    let test = () => {
+        // TODO : test Popup with start stop, and room creator
+        generateLogin(true);
+        closeIntro();
+        setInterval(() => {
+            if (connected) {
+                sendMessage("test test test 1234!!!!!!!!!!!!!!!!!!!!!!!", true);
+            }
+        }, 50)
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+        if (location.protocol === 'https:') {
+            secure = true;
+            console.log("This page is served over HTTPS.");
+        } else {
+            console.log("This page is not served over HTTPS.", location.protocol);
+        }
+        keyListener();
+        loadIntro();
+    });
+</script>
+</body>
+</html>
