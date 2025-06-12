@@ -33,8 +33,11 @@ func (s *Session) removeClient(id string) {
 
 func (s *Session) stats() {
 	s.mutex.Lock()
-	elapsedTime := time.Now().Sub(s.Created)
-	log.Printf("Session %s is dead, removing...\n  Lifetime: %v\n  Message count: %d\n  MPS: %.2f\n", s.ID, elapsedTime, s.MsgCount, float64(s.MsgCount)/elapsedTime.Seconds())
+	elapsed := time.Now().Sub(s.Created)
+	log.Printf(`Session %v is dead, removing...
+  Lifetime: %v
+  Message count: %d
+  MPS: %0.2f`, s.ID, elapsed, s.MsgCount, float64(s.MsgCount)/elapsed.Seconds())
 	s.mutex.Unlock()
 }
 
@@ -63,20 +66,13 @@ func (s *Session) connections() (cc int) {
 }
 
 func (s *Session) reportUserCount() {
-	var cc int
-	cc = s.connections()
-	jcc := struct {
+	uc, err := json.Marshal(struct {
 		CC int `json:"cc"`
-	}{
-		CC: cc,
-	}
-	// TODO : rename var
-	tucc, err := json.Marshal(jcc)
+	}{CC: s.connections()})
 	if err != nil {
 		log.Printf("Error marshaling jcc: %v\n", err)
 	}
-	if err := s.sendMessage(tucc, "server", websocket.BinaryMessage); err != nil {
+	if err := s.sendMessage(uc, "server", websocket.BinaryMessage); err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
-	
 }

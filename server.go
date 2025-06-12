@@ -46,16 +46,22 @@ func (s *Server) getSession(id string) (*Session, bool) {
 	return session, ok
 }
 
+func (s *Server) upgrader() func(r *http.Request) bool {
+	return func(r *http.Request) bool {
+		return true
+	}
+}
+
 func (s *Server) start() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		if _, err := w.Write(rootHtml); err != nil {
 			log.Printf("error writing root html: %v\n", err)
-			panic(err)
+			return
 		}
 	})
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		upgrader.CheckOrigin = checkOrigin()
+		upgrader.CheckOrigin = s.upgrader()
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade:", err)
@@ -84,19 +90,22 @@ func (s *Server) start() {
 		} else {
 			return
 		}
-		if len(prs.P) > 32 || len(prs.ID) > 32 {
+		if len(prs.P) > 32 || len(prs.P) < 8 || len(prs.ID) > 32 || len(prs.ID) < 3 {
 			return
 		}
 		var ns *Session
-		sessionExists := false
 		ns, ok := s.getSession(prs.ID)
 		if ok {
-			sessionExists = true
+			// LIMIT connected users to 10
+			if ns.connections() >= 10 {
+				// TODO : send reason
+				return
+			}
 			if checkPass([]byte(prs.P), ns.Password) != nil {
+				return
 			}
 			ns.addClient(r.RemoteAddr, c)
-		}
-		if !sessionExists {
+		} else {
 			hash, err := genHash([]byte(prs.P))
 			if err != nil {
 				log.Printf("Error generating hash: %v\n", err)
